@@ -1,0 +1,62 @@
+name: Update Docker Image
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  docker_changes:
+    runs-on: ubuntu-latest
+    outputs:
+      docker: ${{ steps.filter.outputs.docker }}
+      full_image: ${{ steps.calc_vars.outputs.full_image }}
+      gcc_ver: ${{ steps.calc_vars.outputs.gcc_ver }}
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          base: main
+          filters: |
+            docker:
+              - 'Dockerfile'
+              - 'VERSION'
+
+      - name: Determine Docker Tag and Version
+        id: calc_vars
+        run: |
+          VERSION=$(cat VERSION)
+          OWNER=${{ github.repository_owner }}
+          IMAGE_PATH="ghcr.io/${OWNER,,}/gcc-environment"
+
+          echo "gcc_ver=${VERSION}" >> $GITHUB_OUTPUT
+          echo "full_image=${IMAGE_PATH}:${VERSION}" >> $GITHUB_OUTPUT
+
+  build_docker:
+    needs: docker_changes
+    if: needs.docker_changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Check out the repo
+        uses: actions/checkout@v6
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ needs.docker_changes.outputs.full_image }}
+          build-args: |
+            GCC_VERSION=${{ needs.docker_changes.outputs.gcc_ver }}
